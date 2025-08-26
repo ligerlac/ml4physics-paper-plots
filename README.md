@@ -1,0 +1,1 @@
+Self-contained training scripts for qkeras-, hgq-, and difflogic-based student models. These also save training histories and predictions for the test set to disk. This allows a seperate script with minimal dependencies to read them back and made common plots. Allows allows to easily swap or re-train / fine tune models.
