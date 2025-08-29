@@ -39,12 +39,68 @@ class ClampLayer(torch.nn.Module):
 
 def get_modelski(name: str, channels: int, learning_rate=0.01):
     llkw = {
-        'grad_factor': 1.0,
         'connections': 'random',
         'implementation': 'python',
         # 'device': 'cpu'
     }
-    if name == "clgn-zb-only-4qb":
+    if name == "clgn-single-channel":
+        n_kernels = 4
+        n_neurons_last_layer = 256 * 8
+        tau = n_neurons_last_layer / 1024
+        beta = -n_neurons_last_layer / 2 + 32 * tau
+        model = torch.nn.Sequential(
+            LogicConv2d(
+                in_dim=(18, 14),
+                stride=1,
+                num_kernels=n_kernels,
+                channels=1,
+                tree_depth=6,
+                receptive_field_size=4,
+                padding=0,
+                connections='random',
+                implementation='python',
+                device='cpu'
+            ),
+            torch.nn.Flatten(),
+            LogicLayer(in_dim=(18-4+1)*(14-4+1)*n_kernels, out_dim=1000,
+                       grad_factor=1.0, connections='random', implementation='python', device='cpu'),
+            LogicLayer(in_dim=1000, out_dim=1000,
+                       grad_factor=1.0, connections='random', implementation='python', device='cpu'),
+            LogicLayer(in_dim=1000, out_dim=n_neurons_last_layer,
+                       grad_factor=1.0, connections='random', implementation='python', device='cpu'),
+            GroupSum(1, tau=tau, beta=beta),
+        )
+
+    elif name == "clgn-zb-only-3qb":
+        n_kernels_1 = 4
+        n_neurons_last_layer = 256 * 8
+        tau = n_neurons_last_layer / 1024
+        beta = -n_neurons_last_layer / 2 + 32 * tau
+        model = torch.nn.Sequential(
+            LogicConv2d(
+                in_dim=(18, 14),
+                stride=1,
+                num_kernels=n_kernels_1,
+                channels=3,
+                tree_depth=6,
+                receptive_field_size=4,
+                padding=0,
+                # connections="random",
+                grad_factor=1.0,
+                connections='random',
+                implementation='python',
+                device='cpu'
+            ),
+            torch.nn.Flatten(),
+            LogicLayer(in_dim=(18-4+1)*(14-4+1)*n_kernels_1, out_dim=1000,
+                       grad_factor=1.0, connections='random', implementation='python', device='cpu'),
+            LogicLayer(in_dim=1000, out_dim=1000,
+                       grad_factor=1.0, connections='random', implementation='python', device='cpu'),
+            LogicLayer(in_dim=1000, out_dim=n_neurons_last_layer,
+                       grad_factor=1.0, connections='random', implementation='python', device='cpu'),
+            GroupSum(1, tau=tau, beta=beta),
+        )
+    elif name == "clgn-zb-only-4qb":
         n_kernels_1 = 4
         n_neurons_last_layer = 256 * 8
         tau = n_neurons_last_layer / 1024
@@ -306,66 +362,12 @@ def main(args):
     y_test = y_test[:10_000]
     is_outlier_test = is_outlier_test[:10_000]
 
-    # pad zeros to turn 18x14 into 18x18
-    x_train = F.pad(x_train, (0, 4, 0, 0))
-    x_val = F.pad(x_val, (0, 4, 0, 0))
-    x_test = F.pad(x_test, (0, 4, 0, 0))
-
-    # x_train = torch.log1p(x_train).to(device)
-    # x_val = torch.log1p(x_val).to(device)
-    # x_test = torch.log1p(x_test).to(device)
-
-    # global_max = max(x_train.max(), x_val.max(), x_test.max())
-    # global_max = 2.
-    # x_train = (x_train / global_max).to(device)
-    # x_val = (x_val / global_max).to(device)
-    # x_test = (x_test / global_max).to(device)
-
-    # plt.hist(x_train.detach().cpu().numpy().flatten(), bins=100)
-    # plt.show()
-
-    # transform = get_int_to_bits_transform(10)
-    # N_BITS = 10
-
     if args.transform_name != "identity":
         transform = get_transform(args.transform_name)
         x_train, x_val, x_test = transform(x_train.int()), transform(x_val.int()), transform(x_test.int())
 
-
-    N_BITS = 4
-    # N_BITS = 1
-    
-    # add an axes to get shape (n, 1, 18, 14)
-    # x_train, x_val, x_test = x_train.unsqueeze(1), x_val.unsqueeze(1), x_test.unsqueeze(1)
-
-
-    
-    # exit()
-
-    # ###   Optional: logarithmic scaling for reduced number of bits   ###
-    # N_BITS = 10
-
-    # # scale logarithmically w/ ideal base (no wasted range)
-    # base = 1025 ** (1 / 2**N_BITS)
-    # x_train = (torch.log(x_train + 1) / torch.log(torch.tensor(base))).int()
-    # x_val = (torch.log(x_val + 1) / torch.log(torch.tensor(base))).int()
-
-    # # represent in binary (expand dims to (m, 18, 14, N_BITS))
-    # x_train = x_train.int().unsqueeze(-1).bitwise_and(1 << torch.arange(N_BITS-1, -1, -1)).ne(0).int()
-    # x_val = x_val.int().unsqueeze(-1).bitwise_and(1 << torch.arange(N_BITS-1, -1, -1)).ne(0).int()
-
-    # print(f'x_train.shape = {x_train.shape}')
-    # print(f'x_val.shape = {x_val.shape}')
-
-    # import matplotlib.pyplot as plt
-    # plt.hist(x_train.detach().numpy().flatten(), bins=100)
-    # plt.show()
-
-    # plt.hist(x_train.detach().numpy().flatten(), bins=100)
-    # plt.yscale("log")
-    # plt.show()
-
-    # exit()
+    plt.hist(x_train.detach().cpu().numpy().flatten(), bins=100)
+    plt.show()
 
     # model, loss_fn, optim = get_model(args, in_dim=(N_BITS, 18, 18))
     model, loss_fn, optim = get_modelski(args.model_name, channels=4, learning_rate=args.learning_rate)
@@ -435,7 +437,7 @@ def main(args):
     plt.hist(y_pred, bins=100)
     plt.show()
 
-    torch.save(model, f"data/models/{args.model_name}.pt")
+    torch.save(model, args.output)
     np.save(f"data/predictions/{args.model_name}_x_test.npy", y_pred)
 
     ####################################################################################
@@ -546,6 +548,7 @@ if __name__ == '__main__':
     parser.add_argument('--interactive', action='store_true', help='Interactively display plots as they are created', default=False)
 
     parser.add_argument('--model-name', type=str, default='clgn-zb-only-4qb', help='Name of the model')
+    parser.add_argument('--output', type=str, default='data/models/latest.pt', help='path to save the trained model to')
     parser.add_argument('--transform-name', type=str, default='identity', help='Name of the bit transform to use')
     parser.add_argument('--device', type=str, default='cpu', help='Device to use for training')
 

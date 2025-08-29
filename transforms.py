@@ -51,10 +51,16 @@ def get_clipped_threshold_transform(thresholds: List[float]):
 
 
 def get_transform(name: str):
-    if name == "t4qb":
+    if name == "log":
+        transform = lambda x: torch.unsqueeze(torch.log1p(x) / 2.0, dim=1)
+    elif name == "t3qb":
+        transform = get_threshold_transform([0, 1, 4])
+    elif name == "t4qb":
         transform = get_threshold_transform([0, 1, 2, 32])
     elif name == "t5qb":
         transform = get_threshold_transform([0, 1, 2, 16, 64])
+    elif name == "c3qb":
+        transform = get_clipped_threshold_transform([0, 1, 4])
     else:
         raise ValueError(f"Unknown transform name: {name}")
     return transform
@@ -71,3 +77,29 @@ def get_transform(name: str):
     # _ = transform2(torch.tensor([[[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]]))
 
     # exit(0)
+
+
+        # ###   Optional: logarithmic scaling for reduced number of bits   ###
+    # N_BITS = 10
+
+    # # scale logarithmically w/ ideal base (no wasted range)
+    # base = 1025 ** (1 / 2**N_BITS)
+    # x_train = (torch.log(x_train + 1) / torch.log(torch.tensor(base))).int()
+    # x_val = (torch.log(x_val + 1) / torch.log(torch.tensor(base))).int()
+
+    # # represent in binary (expand dims to (m, 18, 14, N_BITS))
+    # x_train = x_train.int().unsqueeze(-1).bitwise_and(1 << torch.arange(N_BITS-1, -1, -1)).ne(0).int()
+    # x_val = x_val.int().unsqueeze(-1).bitwise_and(1 << torch.arange(N_BITS-1, -1, -1)).ne(0).int()
+
+    # print(f'x_train.shape = {x_train.shape}')
+    # print(f'x_val.shape = {x_val.shape}')
+
+    # import matplotlib.pyplot as plt
+    # plt.hist(x_train.detach().numpy().flatten(), bins=100)
+    # plt.show()
+
+    # plt.hist(x_train.detach().numpy().flatten(), bins=100)
+    # plt.yscale("log")
+    # plt.show()
+
+    # exit()
