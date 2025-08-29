@@ -2,6 +2,36 @@ from typing import List
 import numpy as np
 from sklearn.metrics import roc_curve, auc
 import h5py
+import os
+import argparse
+
+
+class CreateFolder(argparse.Action):
+    """
+    Custom action: create a new folder if not exist. If the folder
+    already exists, do nothing.
+
+    The action will strip off trailing slashes from the folder's name.
+    """
+
+    def create_folder(self, folder_name):
+        """
+        Create a new directory if not exist. The action might throw
+        OSError, along with other kinds of exception
+        """
+        if not os.path.isdir(folder_name):
+            os.mkdir(folder_name)
+
+        # folder_name = folder_name.rstrip(os.sep)
+        folder_name = os.path.normpath(folder_name)
+        return folder_name
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        if type(values) == list:
+            folders = list(map(self.create_folder, values))
+        else:
+            folders = self.create_folder(values)
+        setattr(namespace, self.dest, folders)
 
 
 def get_fractions_above_threshold(scores):
@@ -155,12 +185,21 @@ def get_training_data(base_dir: str = "saved_inputs_targets", backend: str = "nu
     is_outlier_test = np.concatenate(
         [np.zeros_like(y_ZB_test), np.ones_like(y_outlier_test)], axis=0
     ).astype(bool)
-    
 
-    perm = np.random.permutation(X_train.shape[0])
-    X_train = X_train[perm]
-    y_train = y_train[perm]
-    is_outlier_train = is_outlier_train[perm]
+    perm_train = np.random.permutation(X_train.shape[0])
+    X_train = X_train[perm_train]
+    y_train = y_train[perm_train]
+    is_outlier_train = is_outlier_train[perm_train]
+
+    perm_val = np.random.permutation(X_val.shape[0])
+    X_val = X_val[perm_val]
+    y_val = y_val[perm_val]
+    is_outlier_val = is_outlier_val[perm_val]
+
+    perm_test = np.random.permutation(X_test.shape[0])
+    X_test = X_test[perm_test]
+    y_test = y_test[perm_test]
+    is_outlier_test = is_outlier_test[perm_test]
 
     if backend == "torch":
         import torch
