@@ -1,0 +1,42 @@
+student_label,process,wasserstein_distance,roc_auc
+1Em3,TTtoHadronic,30.28,0.5
+1Em3,TTto2L2Nu,29.15,0.5
+1Em3,TTtoSemiLeptonic,29.48,0.5
+1Em3,SingleNeutrino,17.15,0.5
+1Em3,QCD,16.07,0.5
+1Em3,Zero Bias,12.79741837176399,0.0
+1Em4,TTtoHadronic,5.44,0.85
+1Em4,TTto2L2Nu,7.39,0.75
+1Em4,TTtoSemiLeptonic,6.32,0.8
+1Em4,SingleNeutrino,1.18,0.23
+1Em4,QCD,2.28,0.32
+1Em4,Zero Bias,1.1933209037532437,0.0
+1Em5,TTtoHadronic,7.52,0.87
+1Em5,TTto2L2Nu,8.03,0.77
+1Em5,TTtoSemiLeptonic,7.82,0.82
+1Em5,SingleNeutrino,0.2,0.21
+1Em5,QCD,0.65,0.29
+1Em5,Zero Bias,1.8956649398225973,0.0
+1Em6,TTtoHadronic,1.86,0.88
+1Em6,TTto2L2Nu,2.44,0.79
+1Em6,TTtoSemiLeptonic,2.22,0.84
+1Em6,SingleNeutrino,0.15,0.21
+1Em6,QCD,0.1,0.28
+1Em6,Zero Bias,1.5546319604586178,0.0
+mixed,TTtoHadronic,7.22,0.84
+mixed,TTto2L2Nu,10.84,0.74
+mixed,TTtoSemiLeptonic,9.29,0.8
+mixed,SingleNeutrino,4.64,0.34
+mixed,QCD,6.54,0.44
+mixed,Zero Bias,1.19721784730956,0.0
+qkeras,TTtoHadronic,4.8,0.86
+qkeras,TTto2L2Nu,4.5,0.78
+qkeras,TTtoSemiLeptonic,4.51,0.83
+qkeras,SingleNeutrino,0.07,0.19
+qkeras,QCD,0.41,0.26
+qkeras,Zero Bias,1.291200214331895,0.0
+Teacher,TTtoHadronic,0.0,0.8504074581241374
+Teacher,TTto2L2Nu,0.0,0.766570766563704
+Teacher,TTtoSemiLeptonic,0.0,0.8131665458977315
+Teacher,SingleNeutrino,0.0,0.20271631017004607
+Teacher,QCD,0.0,0.26324462556045514
