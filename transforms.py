@@ -6,9 +6,9 @@ def get_int_to_bits_transform(num_bits=4):
     def transform(x):
         bit_masks = torch.tensor([2**i for i in range(num_bits)], device=x.device, dtype=x.dtype)
         shape = [1] * x.ndim
-        shape.insert(-1, num_bits)  # Insert num_bits at second-to-last position
+        shape.insert(-2, num_bits)  # Insert num_bits at third-to-last position
         bit_masks = bit_masks.view(shape)
-        bits = ((x.unsqueeze(-2) & bit_masks) > 0).float()
+        bits = ((x.unsqueeze(-3) & bit_masks) > 0).float()
         return bits
     return transform
 
