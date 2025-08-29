@@ -135,7 +135,7 @@ def get_modelski(name: str, channels: int, learning_rate=0.01):
     elif name == "clgn-min":
         # n_kernels = 6
         n_kernels = 4
-        n_neurons_last_layer = 256
+        n_neurons_last_layer = 256 * 16
         tau = n_neurons_last_layer / 512
         beta = -n_neurons_last_layer / 2 + 32 * tau
         model = torch.nn.Sequential(
@@ -145,9 +145,9 @@ def get_modelski(name: str, channels: int, learning_rate=0.01):
                 # stride=1,
                 num_kernels=n_kernels,
                 # channels=3,
-                channels=6,
+                channels=4,
                 tree_depth=8,
-                receptive_field_size=2,
+                receptive_field_size=4,
                 padding=0,
                 # connections="random",
                 connections='random',
@@ -157,7 +157,7 @@ def get_modelski(name: str, channels: int, learning_rate=0.01):
             torch.nn.Flatten(),
             # LogicLayer(in_dim= (18-4+1)*(14-4+1)*n_kernels, out_dim=2000, 
             #            connections='random', implementation='python', device='cpu'),
-            LogicLayer(in_dim=63 * n_kernels, out_dim=2000, 
+            LogicLayer(in_dim=48 * n_kernels, out_dim=2000, 
                        connections='random', implementation='python', device='cpu'),
             LogicLayer(in_dim=2000, out_dim=2000,
                        connections='random', implementation='python', device='cpu'),
@@ -167,6 +167,42 @@ def get_modelski(name: str, channels: int, learning_rate=0.01):
                        connections='random', implementation='python', device='cpu'),
             GroupSum(1, tau=tau, beta=beta),
         )
+
+    # elif name == "clgn-10bit":
+    #     # n_kernels = 6
+    #     n_kernels = 4
+    #     n_neurons_last_layer = 256
+    #     tau = n_neurons_last_layer / 512
+    #     beta = -n_neurons_last_layer / 2 + 32 * tau
+    #     model = torch.nn.Sequential(
+    #         LogicConv2d(
+    #             in_dim=(18, 14),
+    #             stride=2,
+    #             # stride=1,
+    #             num_kernels=n_kernels,
+    #             # channels=3,
+    #             channels=6,
+    #             tree_depth=8,
+    #             receptive_field_size=2,
+    #             padding=0,
+    #             # connections="random",
+    #             connections='random',
+    #             implementation='python',
+    #             device='cpu'
+    #         ),
+    #         torch.nn.Flatten(),
+    #         # LogicLayer(in_dim= (18-4+1)*(14-4+1)*n_kernels, out_dim=2000, 
+    #         #            connections='random', implementation='python', device='cpu'),
+    #         LogicLayer(in_dim=63 * n_kernels, out_dim=2000, 
+    #                    connections='random', implementation='python', device='cpu'),
+    #         LogicLayer(in_dim=2000, out_dim=2000,
+    #                    connections='random', implementation='python', device='cpu'),
+    #         LogicLayer(in_dim=2000, out_dim=2000,
+    #                    connections='random', implementation='python', device='cpu'),
+    #         LogicLayer(in_dim=2000, out_dim=n_neurons_last_layer,
+    #                    connections='random', implementation='python', device='cpu'),
+    #         GroupSum(1, tau=tau, beta=beta),
+    #     )
     elif name == "clgn-zb-only-3qb":
         n_kernels_1 = 4
         n_neurons_last_layer = 256 * 8

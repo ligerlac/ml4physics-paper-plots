@@ -59,6 +59,8 @@ def get_transform(name: str):
         transform = get_log_threshold_transform([1, 8])
     elif name == "lt3":
         transform = get_log_threshold_transform([1, 3, 5])
+    elif name == "lt4":
+        transform = get_log_threshold_transform([1, 3, 5, 10])
     elif name == "lt6":
         transform = get_log_threshold_transform([0, 1, 2, 4, 8, 16])
     elif name == "lt7":
@@ -83,6 +85,8 @@ def get_transform(name: str):
         transform = get_smooth_threshold_transform([0, 2], steepness=2)
     elif name == "st3":
         transform = get_smooth_threshold_transform([0, 2, 16], steepness=2)
+    elif name == "10bit":
+        transform = get_int_to_bits_transform(num_bits=10)
     else:
         raise ValueError(f"Unknown transform name: {name}")
     return transform
