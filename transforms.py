@@ -15,10 +15,7 @@ def get_int_to_bits_transform(num_bits=4):
 
 def get_threshold_transform(thresholds: List[float]):
     def transform(x):
-        print(f"before:\n{x[0, 0, :]}")
-
         result = torch.stack([(x > t).float() for t in thresholds], dim=1)
-        print(f"after:\n{result[0, :, 0, :]}")
         return result
     return transform
 
@@ -27,10 +24,8 @@ def get_smooth_threshold_transform(thresholds: List[float], steepness: float = 1
     thresholds = torch.tensor(thresholds)
     def transform(x):
         # Using sigmoid to create smooth transitions
-        print(f"before:\n{x[0, 0, :]}")
         # result = torch.stack([torch.sigmoid(steepness * (x - t - 0.5)/(torch.sqrt(t) + 1e-6)) for t in thresholds], dim=1)
         result = torch.stack([torch.sigmoid(steepness * ((x - t)/(t + 1e-6) - 0.5)) for t in thresholds], dim=1)
-        print(f"after:\n{result[0, :, 0, :]}")
         return result
     return transform
 
@@ -43,9 +38,14 @@ def get_clipped_threshold_transform(thresholds: List[float]):
             l = thresholds[i]
             u = thresholds[i+1]
             result.append(torch.clamp((x-l) / (u-l), 0, 1))
-        print(f"before:\n{x[0, 0, :]}")
         result = torch.stack(result, dim=1).float()
-        print(f"after:\n{result[0, :, 0, :]}")
+        return result
+    return transform
+
+
+def get_log_threshold_transform(thresholds: List[float]):
+    def transform(x):
+        result = torch.stack([torch.log1p(torch.clamp(x - t, min=0) / 2.) for t in thresholds], dim=1)
         return result
     return transform
 
@@ -53,6 +53,14 @@ def get_clipped_threshold_transform(thresholds: List[float]):
 def get_transform(name: str):
     if name == "log":
         transform = lambda x: torch.unsqueeze(torch.log1p(x) / 2.0, dim=1)
+    elif name == "lt2":
+        transform = get_log_threshold_transform([0, 2])
+    elif name == "lt2h":
+        transform = get_log_threshold_transform([1, 8])
+    elif name == "lt3":
+        transform = get_log_threshold_transform([0, 2, 16])
+    elif name == "lt3l":
+        transform = get_log_threshold_transform([0, 2, 4])
     elif name == "t3qb":
         transform = get_threshold_transform([0, 1, 4])
     elif name == "t4qb":
@@ -61,6 +69,16 @@ def get_transform(name: str):
         transform = get_threshold_transform([0, 1, 2, 16, 64])
     elif name == "c3qb":
         transform = get_clipped_threshold_transform([0, 1, 4])
+    elif name == "ct2":
+        transform = get_clipped_threshold_transform([0, 2])
+    elif name == "ct3":
+        transform = get_clipped_threshold_transform([0, 2, 16])
+    elif name == "ct4":
+        transform = get_clipped_threshold_transform([0, 1, 2, 4])
+    elif name == "st2":
+        transform = get_smooth_threshold_transform([0, 2], steepness=2)
+    elif name == "st3":
+        transform = get_smooth_threshold_transform([0, 2, 16], steepness=2)
     else:
         raise ValueError(f"Unknown transform name: {name}")
     return transform
@@ -103,3 +121,22 @@ def get_transform(name: str):
     # plt.show()
 
     # exit()
+
+if __name__ == "__main__":
+    trafo = get_transform("ct4")
+    x = torch.tensor([0, 1, 2, 3, 10])
+    y = trafo(x)
+    print(f"x =\n{x}")
+    print(f"y =\n{y}")
+
+    exit(0)
+
+    transform1 = get_smooth_threshold_transform([0, 2, 4], steepness=2)
+    transform2 = get_threshold_transform([0, 2, 4])
+    x = torch.tensor([0, 1, 2, 3, 10])
+    t1 = transform1(x)
+    t2 = transform2(x)
+    b = t2.bool().int()
+    print(f"x = \n{x}")
+    print(f"t1 = \n{t1}")
+    print(f"b = \n{b}")
