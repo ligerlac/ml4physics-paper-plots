@@ -1,6 +1,7 @@
 from typing import List
 import numpy as np
 from sklearn.metrics import roc_curve, auc
+import h5py
 
 
 def get_fractions_above_threshold(scores):
@@ -95,7 +96,7 @@ def get_roc_dict(
     return d
 
 
-def get_data(base_dir: str = "saved_inputs_targets"):
+def get_training_data(base_dir: str = "saved_inputs_targets", backend: str = "numpy", zb_frac: int = 1, use_outliers: bool = True):
 
     X_ZB_train = np.load(base_dir + "/ZB_train.npy")
     X_ZB_val = np.load(base_dir + "/ZB_val.npy")
@@ -113,27 +114,90 @@ def get_data(base_dir: str = "saved_inputs_targets"):
     y_outlier_val = np.load(base_dir + "/tt2l2nu_student_target_val.npy")
     y_outlier_test = np.load(base_dir + "/tt2l2nu_student_target_test.npy")
 
-    X_train = np.concatenate([X_ZB_train, X_outlier_train], axis=0)
-    y_train = np.concatenate([y_ZB_train, y_outlier_train], axis=0)
-    X_val = np.concatenate([X_ZB_val, X_outlier_val], axis=0)
-    y_val = np.concatenate([y_ZB_val, y_outlier_val], axis=0)
-    X_test = np.concatenate([X_ZB_test, X_outlier_test], axis=0)
-    y_test = np.concatenate([y_ZB_test, y_outlier_test], axis=0)
+    print(f"y_ZB_train.shape = {y_ZB_train.shape}")
+    print(f"y_outlier_train.shape = {y_outlier_train.shape}")
+
+    print(f"y_ZB_val.shape = {y_ZB_val.shape}")
+    print(f"y_outlier_val.shape = {y_outlier_val.shape}")
+
+    print(f"y_ZB_test.shape = {y_ZB_test.shape}")
+    print(f"y_outlier_test.shape = {y_outlier_test.shape}")
+
+    if zb_frac != -1:
+        X_ZB_train = X_ZB_train[:zb_frac*len(y_outlier_train)]
+        y_ZB_train = y_ZB_train[:zb_frac*len(y_outlier_train)]
+        X_ZB_val = X_ZB_val[:zb_frac*len(y_outlier_val)]
+        y_ZB_val = y_ZB_val[:zb_frac*len(y_outlier_val)]
+        X_ZB_test = X_ZB_test[:zb_frac*len(y_outlier_test)]
+        y_ZB_test = y_ZB_test[:zb_frac*len(y_outlier_test)]
+
+    if use_outliers:
+        X_train = np.concatenate([X_ZB_train, X_outlier_train], axis=0)
+        y_train = np.concatenate([y_ZB_train, y_outlier_train], axis=0)
+        X_val = np.concatenate([X_ZB_val, X_outlier_val], axis=0)
+        y_val = np.concatenate([y_ZB_val, y_outlier_val], axis=0)
+        X_test = np.concatenate([X_ZB_test, X_outlier_test], axis=0)
+        y_test = np.concatenate([y_ZB_test, y_outlier_test], axis=0)
+    else:
+        X_train = X_ZB_train
+        y_train = y_ZB_train
+        X_val = X_ZB_val
+        y_val = y_ZB_val
+        X_test = X_ZB_test
+        y_test = y_ZB_test
 
     is_outlier_train = np.concatenate(
         [np.zeros_like(y_ZB_train), np.ones_like(y_outlier_train)], axis=0
-    )
+    ).astype(bool)
     is_outlier_val = np.concatenate(
         [np.zeros_like(y_ZB_val), np.ones_like(y_outlier_val)], axis=0
-    )
+    ).astype(bool)
     is_outlier_test = np.concatenate(
         [np.zeros_like(y_ZB_test), np.ones_like(y_outlier_test)], axis=0
-    )
+    ).astype(bool)
+    
 
     perm = np.random.permutation(X_train.shape[0])
     X_train = X_train[perm]
     y_train = y_train[perm]
     is_outlier_train = is_outlier_train[perm]
 
+    if backend == "torch":
+        import torch
+        X_train = torch.squeeze(torch.from_numpy(X_train), -1)
+        X_val = torch.squeeze(torch.from_numpy(X_val), -1)
+        X_test = torch.squeeze(torch.from_numpy(X_test), -1)
+
+        y_train = torch.unsqueeze(torch.from_numpy(y_train), -1)
+        y_val = torch.unsqueeze(torch.from_numpy(y_val), -1)
+        y_test = torch.unsqueeze(torch.from_numpy(y_test), -1)
+
+        # y_train = torch.from_numpy(y_train)
+        # y_val = torch.from_numpy(y_val)
+        # y_test = torch.from_numpy(y_test)
+
+        is_outlier_train = torch.tensor(is_outlier_train, dtype=torch.bool)
+        is_outlier_val = torch.tensor(is_outlier_val, dtype=torch.bool)
+        is_outlier_test = torch.tensor(is_outlier_test, dtype=torch.bool)
+
     return X_train, y_train, is_outlier_train, X_val, y_val, is_outlier_val, X_test, y_test, is_outlier_test
+
+
+def get_input_data(base_dir: str = "saved_inputs_targets"):
+    data = {
+        "ZB": np.load(f"{base_dir}/ZB_test.npy")
+    }
+    with h5py.File(f"{base_dir}/tt_hadronic_with_l1evtnPV.h5", 'r') as f:
+        data["ttbar_had"] = f["CaloRegions"][:]
+
+    with h5py.File(f"{base_dir}/tt_semileptonic_with_l1evtnPV.h5", 'r') as f:
+        data["ttbar_semilep"] = f["CaloRegions"][:]
+
+    with h5py.File(f"{base_dir}/qcd_with_l1evtnPV.h5", 'r') as f:
+        data["qcd"] = f["CaloRegions"][:]
+
+    with h5py.File(f"{base_dir}/singleneutrino_with_l1evtnPV.h5", 'r') as f:
+        data["singleneu"] = f["CaloRegions"][:]
+
+    return data
 
