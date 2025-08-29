@@ -58,9 +58,9 @@ def get_transform(name: str):
     elif name == "lt2h":
         transform = get_log_threshold_transform([1, 8])
     elif name == "lt3":
-        transform = get_log_threshold_transform([0, 2, 16])
+        transform = get_log_threshold_transform([1, 3, 5])
     elif name == "lt3l":
-        transform = get_log_threshold_transform([0, 2, 4])
+        transform = get_log_threshold_transform([0, 1, 2])
     elif name == "t3qb":
         transform = get_threshold_transform([0, 1, 4])
     elif name == "t4qb":

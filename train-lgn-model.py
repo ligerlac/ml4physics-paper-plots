@@ -6,10 +6,12 @@ from collections import defaultdict
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
+import pandas as pd
+
 
 from neurodifflogic.models.difflog_layers.linear import GroupSum, LogicLayer
 from neurodifflogic.models.difflog_layers.conv import LogicConv2d, OrPoolingLayer
-from utils import get_training_data
+from utils import get_training_data, CreateFolder
 from transforms import get_transform
 
 from drawing import Draw
@@ -48,10 +50,11 @@ def get_modelski(name: str, channels: int, learning_rate=0.01):
         n_neurons_last_layer = 256 * 8
         tau = n_neurons_last_layer / 1024
         beta = -n_neurons_last_layer / 2 + 32 * tau
+        stride = 2
         model = torch.nn.Sequential(
             LogicConv2d(
                 in_dim=(18, 14),
-                stride=1,
+                stride=stride,
                 num_kernels=n_kernels,
                 channels=1,
                 tree_depth=6,
@@ -62,7 +65,7 @@ def get_modelski(name: str, channels: int, learning_rate=0.01):
                 device='cpu'
             ),
             torch.nn.Flatten(),
-            LogicLayer(in_dim=(18-4+1)*(14-4+1)*n_kernels, out_dim=1000,
+            LogicLayer(in_dim=int((18-4+1)*(14-4+1)*n_kernels / stride**2), out_dim=1000,
                        grad_factor=1.0, connections='random', implementation='python', device='cpu'),
             LogicLayer(in_dim=1000, out_dim=1000,
                        grad_factor=1.0, connections='random', implementation='python', device='cpu'),
@@ -70,7 +73,35 @@ def get_modelski(name: str, channels: int, learning_rate=0.01):
                        grad_factor=1.0, connections='random', implementation='python', device='cpu'),
             GroupSum(1, tau=tau, beta=beta),
         )
-
+    elif name == "clgn-3ch":
+        n_kernels_1 = 4
+        n_neurons_last_layer = 256 * 8
+        tau = n_neurons_last_layer / 1024
+        beta = -n_neurons_last_layer / 2 + 32 * tau
+        model = torch.nn.Sequential(
+            LogicConv2d(
+                in_dim=(18, 14),
+                stride=1,
+                num_kernels=n_kernels_1,
+                channels=3,
+                tree_depth=6,
+                receptive_field_size=4,
+                padding=0,
+                # connections="random",
+                grad_factor=1.0,
+                connections='random',
+                implementation='python',
+                device='cpu'
+            ),
+            torch.nn.Flatten(),
+            LogicLayer(in_dim=(18-4+1)*(14-4+1)*n_kernels_1, out_dim=1000,
+                       grad_factor=1.0, connections='random', implementation='python', device='cpu'),
+            LogicLayer(in_dim=1000, out_dim=1000,
+                       grad_factor=1.0, connections='random', implementation='python', device='cpu'),
+            LogicLayer(in_dim=1000, out_dim=n_neurons_last_layer,
+                       grad_factor=1.0, connections='random', implementation='python', device='cpu'),
+            GroupSum(1, tau=tau, beta=beta),
+        )
     elif name == "clgn-zb-only-3qb":
         n_kernels_1 = 4
         n_neurons_last_layer = 256 * 8
@@ -152,6 +183,75 @@ def get_modelski(name: str, channels: int, learning_rate=0.01):
             LogicLayer(in_dim=1000, out_dim=n_neurons_last_layer, **llkw),
             GroupSum(1, tau=tau, beta=beta)
         )
+
+    elif name == "lgn-single-channel":
+        n_neurons_last_layer = 256 * 8
+        tau = n_neurons_last_layer/1024
+        beta = -n_neurons_last_layer/2 + 32 * tau
+        in_dim = 18 * 14
+
+        model = torch.nn.Sequential(
+            torch.nn.Flatten(),
+            LogicLayer(in_dim=in_dim, out_dim=4000, **llkw),
+            LogicLayer(in_dim=4000, out_dim=2000, **llkw),
+            LogicLayer(in_dim=2000, out_dim=1000, **llkw),
+            # LogicLayer(in_dim=1000, out_dim=1000, **llkw),
+            LogicLayer(in_dim=1000, out_dim=n_neurons_last_layer, **llkw),
+            GroupSum(1, tau=tau, beta=beta),
+            # ClampLayer(0, 256)
+        )
+
+    elif name == "lgn-lt2":
+        n_neurons_last_layer = 256 * 8
+        tau = n_neurons_last_layer/1024
+        beta = -n_neurons_last_layer/2 + 32 * tau
+        in_dim = 2 * 18 * 14
+
+        model = torch.nn.Sequential(
+            torch.nn.Flatten(),
+            LogicLayer(in_dim=in_dim, out_dim=4000, **llkw),
+            LogicLayer(in_dim=4000, out_dim=2000, **llkw),
+            LogicLayer(in_dim=2000, out_dim=1000, **llkw),
+            # LogicLayer(in_dim=1000, out_dim=1000, **llkw),
+            LogicLayer(in_dim=1000, out_dim=n_neurons_last_layer, **llkw),
+            GroupSum(1, tau=tau, beta=beta),
+            # ClampLayer(0, 256)
+        )
+
+    elif name == "lgn-3ch":
+        n_neurons_last_layer = 256 * 8
+        tau = n_neurons_last_layer/1024
+        beta = -n_neurons_last_layer/2 + 32 * tau
+        in_dim = 3 * 18 * 14
+
+        model = torch.nn.Sequential(
+            torch.nn.Flatten(),
+            LogicLayer(in_dim=in_dim, out_dim=5000, **llkw),
+            LogicLayer(in_dim=5000, out_dim=2000, **llkw),
+            LogicLayer(in_dim=2000, out_dim=1000, **llkw),
+            # LogicLayer(in_dim=1000, out_dim=1000, **llkw),
+            LogicLayer(in_dim=1000, out_dim=n_neurons_last_layer, **llkw),
+            GroupSum(1, tau=tau, beta=beta),
+            # ClampLayer(0, 256)
+        )
+
+    elif name == "lgn-4ch":
+        n_neurons_last_layer = 256 * 8
+        tau = n_neurons_last_layer/1024
+        beta = -n_neurons_last_layer/2 + 32 * tau
+        in_dim = 4 * 18 * 14
+
+        model = torch.nn.Sequential(
+            torch.nn.Flatten(),
+            LogicLayer(in_dim=in_dim, out_dim=6000, **llkw),
+            LogicLayer(in_dim=6000, out_dim=2000, **llkw),
+            LogicLayer(in_dim=2000, out_dim=1000, **llkw),
+            # LogicLayer(in_dim=1000, out_dim=1000, **llkw),
+            LogicLayer(in_dim=1000, out_dim=n_neurons_last_layer, **llkw),
+            GroupSum(1, tau=tau, beta=beta),
+            # ClampLayer(0, 256)
+        )
+
     elif name == "lgn-4qb":
         n_neurons_last_layer = 256 * 8
         # tau has to be adjusted to the desired spread of values (let's say a spread of 1024)
@@ -169,8 +269,8 @@ def get_modelski(name: str, channels: int, learning_rate=0.01):
             LogicLayer(in_dim=2000, out_dim=1000, **llkw),
             # LogicLayer(in_dim=1000, out_dim=1000, **llkw),
             LogicLayer(in_dim=1000, out_dim=n_neurons_last_layer, **llkw),
-            GroupSum(class_count, tau=tau, beta=beta),
-            ClampLayer(0, 256)
+            GroupSum(1, tau=tau, beta=beta),
+            # ClampLayer(0, 256)
         )
     else:
         raise ValueError(f"Unknown model name: {name}")
@@ -347,10 +447,10 @@ def main(args):
     random.seed(args.seed)
     np.random.seed(args.seed)
 
-    x_train, y_train, is_outlier_train, x_val, y_val, is_outlier_val, x_test, y_test, is_outlier_test = \
-        get_training_data("saved_inputs_targets", backend="torch", zb_frac=-1, use_outliers=False)
     # x_train, y_train, is_outlier_train, x_val, y_val, is_outlier_val, x_test, y_test, is_outlier_test = \
-    #     get_training_data("saved_inputs_targets", backend="torch", zb_frac=4, use_outliers=True)
+    #     get_training_data("saved_inputs_targets", backend="torch", zb_frac=-1, use_outliers=False)
+    x_train, y_train, is_outlier_train, x_val, y_val, is_outlier_val, x_test, y_test, is_outlier_test = \
+        get_training_data("saved_inputs_targets", backend="torch", zb_frac=4, use_outliers=True)
     # x_train, y_train, is_outlier_train, x_val, y_val, is_outlier_val, x_test, y_test, is_outlier_test = \
     #     get_training_data("saved_inputs_targets", backend="torch", zb_frac=0, use_outliers=True)
     
@@ -365,6 +465,8 @@ def main(args):
     if args.transform_name != "identity":
         transform = get_transform(args.transform_name)
         x_train, x_val, x_test = transform(x_train.int()), transform(x_val.int()), transform(x_test.int())
+
+    print(f"x_train.shape = {x_train.shape}, y_train.shape = {y_train.shape}")
 
     plt.hist(x_train.detach().cpu().numpy().flatten(), bins=100)
     plt.show()
@@ -422,14 +524,20 @@ def main(args):
 
             print({k: v[-1] for k, v in losses.items()})
 
-        # after 200 epochs, add clamp layer
-        if i == 300:
+        if (i+1) % args.save_freq == 0:
+            df = pd.DataFrame(losses)
+            df.to_csv(f"{args.output}/losses.csv", index=False)
+            torch.save(model, f"{args.output}/model_iter{i+1}.pt")
+
+        # after some epochs, add clamp layer
+        if i == 5000:
             print(f"Adding clamp layer now")
             model = torch.nn.Sequential(
                 model,
                 ClampLayer(0, 256)
             ).to(args.device)
 
+    torch.save(model, f"{args.output}/model.pt")
 
     y_pred = predict_batch(model, x_test, batch_size=128, device=args.device)
     y_pred = y_pred.cpu().detach().numpy().flatten()
@@ -437,7 +545,6 @@ def main(args):
     plt.hist(y_pred, bins=100)
     plt.show()
 
-    torch.save(model, args.output)
     np.save(f"data/predictions/{args.model_name}_x_test.npy", y_pred)
 
     ####################################################################################
@@ -536,6 +643,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--num-iterations', '-ni', type=int, default=100_000, help='Number of iterations (default: 100_000)')
     parser.add_argument('--eval-freq', '-ef', type=int, default=2_000, help='Evaluation frequency (default: 2_000)')
+    parser.add_argument('--save-freq', '-sf', type=int, default=5_000, help='Save frequency (default: 5_000)')
 
     parser.add_argument('--valid-set-size', '-vss', type=float, default=0., help='Fraction of the train set used for validation (default: 0.)')
     parser.add_argument('--extensive-eval', action='store_true', help='Additional evaluation (incl. valid set eval).')
@@ -548,7 +656,7 @@ if __name__ == '__main__':
     parser.add_argument('--interactive', action='store_true', help='Interactively display plots as they are created', default=False)
 
     parser.add_argument('--model-name', type=str, default='clgn-zb-only-4qb', help='Name of the model')
-    parser.add_argument('--output', type=str, default='data/models/latest.pt', help='path to save the trained model to')
+    parser.add_argument('--output', type=str, default='data/models/latest', action=CreateFolder, help='path to save the trained model to')
     parser.add_argument('--transform-name', type=str, default='identity', help='Name of the bit transform to use')
     parser.add_argument('--device', type=str, default='cpu', help='Device to use for training')
 
