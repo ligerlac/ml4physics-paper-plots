@@ -12,7 +12,7 @@ from matplotlib.patches import Patch, Rectangle
 from matplotlib.ticker import MaxNLocator
 from matplotlib import gridspec
 from matplotlib.lines import Line2D
-from mpl_toolkits.axes_grid1.inset_locator import InsetPosition
+# from mpl_toolkits.axes_grid1.inset_locator import InsetPosition
 from sklearn.metrics import roc_curve, auc
 from sklearn.model_selection import StratifiedKFold
 
@@ -46,18 +46,20 @@ class Draw:
             "ZB-masked": "ZB (npv > 10)",
             "SingleNeutrino": "Simulated ZB",
         }
-        self.cms_text = "Preliminary"
-        self.lumi_text = r'2024 (13.6 TeV)'
+        self.cms_text = "Open Data"
+        self.lumi_text = r'2017 (13 TeV)'
         hep.style.use("CMS")
 
     def _parse_name(self, name: str) -> str:
         return name.replace(" ", "-").lower()
     
     def _get_process_color(self, label: str) -> str:
-        return self.process_color_dict.get(label, next(plt.gca()._get_lines.prop_cycler)['color'])
+        return self.process_color_dict.get(label, None)
+        # return self.process_color_dict.get(label, next(plt.gca()._get_lines.prop_cycler)['color'])
 
     def _get_model_color(self, label: str) -> str:
-        return self.model_color_dict.get(label, next(plt.gca()._get_lines.prop_cycler)['color'])
+        return self.model_color_dict.get(label, None)
+        # return self.model_color_dict.get(label, next(plt.gca()._get_lines.prop_cycler)['color'])
     
     def _get_label(self, label: str) -> str:
         return self.label_dict.get(label, label)
@@ -86,7 +88,7 @@ class Draw:
         self, loss_dict: dict[str, (npt.NDArray, npt.NDArray)], name: str
     ):
         for model_name, (train_loss, val_loss) in loss_dict.items():
-            c = next(plt.gca()._get_lines.prop_cycler)['color']
+            # c = next(plt.gca()._get_lines.prop_cycler)['color']
             plt.plot(np.arange(1, len(train_loss) + 1), train_loss, color=c, label=f"{model_name} (Training)")
             plt.plot(np.arange(1, len(val_loss) + 1), val_loss, color=c, ls=":", label=f"{model_name} (Validation)")
         plt.legend(loc="upper right")
@@ -1049,7 +1051,7 @@ class Draw:
         self._save_fig(name)
 
 
-    def make_teacher_student_scatter_plot(
+    def make_scatter_density_plot(
         self,
         teacher_scores: npt.NDArray,
         student_scores: npt.NDArray,
@@ -1058,6 +1060,9 @@ class Draw:
         ylabel: str = "Student Score",
         cutoff: float = 150,
     ):
+        
+        print(f"{teacher_scores.shape=}")
+        print(f"{student_scores.shape=}")
         plt.figure(figsize=(9.5, 6))
         plt.hexbin(teacher_scores, student_scores, gridsize=50, cmap='Blues', bins='log', mincnt=1)
 
@@ -1068,6 +1073,36 @@ class Draw:
         plt.ylabel(ylabel)
         plt.gca().set_xlim(0, cutoff)
         plt.gca().set_ylim(0, cutoff)
+
+        hep.cms.text(self.cms_text, loc=0)
+        hep.cms.lumitext(self.lumi_text)
+
+        self._save_fig(name)
+
+
+    def make_scatter_plot(
+        self,
+        teacher_scores: List[npt.NDArray],
+        student_scores: List[npt.NDArray],
+        labels: List[str],
+        name: str = "cicada_vs_teacher_score",
+        xlabel: str = "Teacher Score",
+        ylabel: str = "Student Score",
+        cutoff: float = 150,
+    ):  
+        plt.figure(figsize=(9.5, 6))
+
+        for t, s, l in zip(teacher_scores, student_scores, labels):
+            plt.scatter(t.flatten(), s.flatten(), alpha=0.1, label=l)
+
+        plt.legend()
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+        plt.xlim(0, cutoff)
+        plt.ylim(0, cutoff)
+
+        # add digonal line in grey
+        plt.plot([0, cutoff], [0, cutoff], color='grey', linestyle='--', linewidth=1, alpha=0.8)
 
         hep.cms.text(self.cms_text, loc=0)
         hep.cms.lumitext(self.lumi_text)
