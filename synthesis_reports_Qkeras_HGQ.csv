@@ -1,0 +1,12 @@
+model_tag,ebops,#DSPs,#FFs,#LUTs,55*#DSP+#LUT,BRAM,URAM,Latency (in cc),II,Clock target,Clock estimated,Clock uncertainty,Notes
+,,,,,,,,,,,,,
+QKeras,-,697,50368,159447,197782,0,0,16,4,6.25 ns,4.334 ns,1.69 ns,
+1Em6,109918,-,-,-,-,-,-,-,-,6.25 ns,-,1.69 ns,Tried a bunch of stuff but the estimated clock was always > 6.25 ns
+1Em5,39170,4,27776,111848,112068,0,0,17,4,6.25 ns,4.528 ns,1.69 ns,
+1Em4,7570,1,6229,38111,38166,0,0,11,4,6.25 ns,4.504 ns,1.69 ns,
+mixed,3301,0,3019,24947,24947,0,0,8,4,6.25 ns,4.5 ns,1.69 ns,
+1Em3,53,-,-,-,-,-,-,-,-,6.25 ns,-,,Didn’t do synthesis as physics performance crashes as can be seen from ROC curve
+,,,,,,,,,,,,,
+* ,Product, family: ,virtex7,,,,,,,,,,
+* ,Target ,device:  ,xc7vx690t-ffg1927-2,,,,,,,,,,
+,Vivada,Version,2021.1,,,,,,,,,,
