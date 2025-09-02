@@ -6,13 +6,16 @@ from collections import defaultdict
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
+import pandas as pd
 
 from neurodifflogic.models.difflog_layers.linear import GroupSum, LogicLayer
 from neurodifflogic.models.difflog_layers.conv import LogicConv2d, OrPoolingLayer
-from utils import get_threshold_transform, get_int_to_bits_transform, get_training_data, get_smooth_threshold_transform, get_clipped_threshold_transform
+from neurodifflogic.models import CNN
 
-from utils2 import load_data_open
-from drawing import Draw
+from utils import get_training_data, CreateFolder
+from transforms import get_transform
+
+#from drawing import Draw
 
 
 BITS_TO_TORCH_FLOATING_POINT_TYPE = {
@@ -35,107 +38,45 @@ class ClampLayer(torch.nn.Module):
 
     def forward(self, x):
         return torch.clamp(x, self.min_value, self.max_value)
+    
 
-
-def get_model(args, in_dim=(1, 18, 14)):
-    """
-    252 input neurons means 252*(252-1)/2 = 31626 possible unique connections (=max size for next layer)
-
-    """
-
-    llkw = {
-        'grad_factor': args.grad_factor,
-        'connections': args.connections,
-        # 'connections': 'unique',
-        'implementation': args.implementation,
-        'device': IMPL_TO_DEVICE[args.implementation]
-    }
-
-    # quantized precision of cicada anomaly score is 256* 256.
-    # Will calculate the mean of output nodes for regression
-    # single class (1-d regression). Choose beta and tau to adjust range.
-    # Number of neurons in second-to-last layer determines precision.
-    # beta (offset) not yet implemented in difflogic
-    class_count = 1
-
-    logic_layers = []
-
-    arch = args.architecture
-    k = args.num_neurons
-    l = args.num_layers
-    t = args.tau
-
-    ####################################################################################################################
-
-    print(f'llkw = {llkw}')
-    llkw['connections'] = 'random'
-
-    # group sum does (sum + beta) / tau
-    # we adjust beta and tau such that pre-training mean matches target mean (~32)
-    # this determnines the precision (e.g. 256 means 256 distinct values)
-    n_neurons_last_layer = 256 * 8
-    # tau has to be adjusted to the desired spread of values (let's say a spread of 1024)
-    # we really only need a spread of 256, but that makes training difficult as ALL neurons
-    # have to be False (True) to reach the edges
-    tau = n_neurons_last_layer/512
-    # adjust beta to center the values around the target mean of ~32
-    beta = -n_neurons_last_layer/2 + 32 * tau
-
-    n_kernels_1 = 8
-    n_kernels_2 = 16
-    channels = in_dim[0]
-
-    # in the receptive field, there will be channels * receptive_field_size * receptive_field_size inputs
-
+def get_model(n_channels: int, n_kernels: int, stride: int, tree_depth: int, receptive_field_size: int, learning_rate=0.01):
+    n_neurons_last_layer = 256 * 16
+    tau = n_neurons_last_layer / 512
+    beta = -n_neurons_last_layer / 2 + 32 * tau
+    out_shape_conv = (
+        (18 - receptive_field_size) // stride + 1,
+        (14 - receptive_field_size) // stride + 1
+    )
+    print(f"out_shape_conv = {out_shape_conv}")
+    print(f"flattened: {out_shape_conv[0]*out_shape_conv[1]}")
     model = torch.nn.Sequential(
         LogicConv2d(
-            in_dim=(18, 18),
-            stride=1,
-            num_kernels=n_kernels_1,
-            channels=channels,
-            tree_depth=5,
-            receptive_field_size=4,
+            in_dim=(18, 14),
+            stride=stride,
+            num_kernels=n_kernels,
+            channels=n_channels,
+            tree_depth=tree_depth,
+            receptive_field_size=receptive_field_size,
             padding=0,
-            # connections="random",
-            **llkw
+            connections='random',
+            implementation='python',
+            device='cpu'
         ),
-        # OrPoolingLayer(kernel_size=2, stride=2, padding=0),
-        # LogicConv2d(
-        #     in_dim=(7, 7),
-        #     stride=1,
-        #     num_kernels=n_kernels_2,
-        #     channels=channels,
-        #     tree_depth=4,
-        #     receptive_field_size=3,
-        #     padding=0,
-        #     # connections="random",
-        #     **llkw
-        # ),
         torch.nn.Flatten(),
-        # LogicLayer(in_dim=(7-3+1)**2*n_kernels_2, out_dim=1000, **llkw),
-        LogicLayer(in_dim=(18-4+1)**2*n_kernels_1, out_dim=1000, **llkw),
-        LogicLayer(in_dim=1000, out_dim=1000, **llkw),
-        LogicLayer(in_dim=1000, out_dim=n_neurons_last_layer, **llkw),
-        GroupSum(class_count, tau=tau, beta=beta),
-        # ClampLayer(0, 256)
+        LogicLayer(in_dim=out_shape_conv[0]*out_shape_conv[1] * n_kernels, out_dim=64*n_kernels,
+                    connections='random', implementation='python', device='cpu'),
+        LogicLayer(in_dim=64*n_kernels, out_dim=32*n_kernels,
+                    connections='random', implementation='python', device='cpu'),
+        LogicLayer(in_dim=32*n_kernels, out_dim=16*n_kernels,
+                    connections='random', implementation='python', device='cpu'),
+        LogicLayer(in_dim=16*n_kernels, out_dim=n_neurons_last_layer,
+                    connections='random', implementation='python', device='cpu'),
+        GroupSum(1, tau=tau, beta=beta),
     )
 
-    ####################################################################################################################
-
-    total_num_neurons = sum(map(lambda x: x.num_neurons, logic_layers[1:-1]))
-    print(f'total_num_neurons={total_num_neurons}')
-    total_num_weights = sum(map(lambda x: x.num_weights, logic_layers[1:-1]))
-    print(f'total_num_weights={total_num_weights}')
-
-    # model = model.to(llkw['device'])
-
-    # print(model)
-
-    # loss_fn = torch.nn.CrossEntropyLoss()
-    # loss_fn = torch.nn.MSELoss()
     loss_fn = torch.nn.L1Loss()
-
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     return model, loss_fn, optimizer
 
@@ -154,6 +95,39 @@ def train(model, x, y, loss_fn, optimizer, weights=None):
     return loss.item()
 
 
+def train_with_regularization(model, x, y, loss_fn, optimizer, conv_entropy_lambda=0.0, ff_entropy_lambda=0.0):
+    # print("TRAINING STEP")
+    # print(f"x.shape = {x.shape}, y.shape = {y.shape}")
+    x = model(x)
+    # print(f"pred.shape = {x.shape},pred[:5] =\n{x[:5]}")
+    loss = loss_fn(x, y)
+
+    # if entropy_lambda > 0.0:
+    conv_entropy, ff_entropy = 0.0, 0.0
+    for layer in model.modules():
+        if isinstance(layer, LogicConv2d):
+            for level_weights in layer.tree_weights:
+                for kernel_node_weights in level_weights:
+                    probs = torch.softmax(kernel_node_weights, dim=1)
+                    entropy = -torch.sum(probs * torch.log(probs + 1e-10), dim=1)
+                    conv_entropy += entropy.sum()
+        
+        elif isinstance(layer, LogicLayer):
+            probs = torch.softmax(layer.weight, dim=1)
+            entropy = -torch.sum(probs * torch.log(probs + 1e-10), dim=1)
+            ff_entropy += entropy.sum()
+
+    # print(f"total_entropy = {total_entropy}, entropy_lambda = {entropy_lambda}")
+    loss = loss + conv_entropy_lambda * conv_entropy + ff_entropy_lambda * ff_entropy
+    # print(f"loss.shape = {loss.shape}, loss = {loss}")
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+    # return loss.item(), total_entropy.item() if entropy_lambda > 0.0 else 0.0
+    return loss.item(), conv_entropy.item(), ff_entropy.item()
+
+
 def predict_batch(model, x, batch_size=128, device='cuda'):
     # print(f"predict_batch. input shape = {x.shape}")
     with torch.no_grad():
@@ -162,7 +136,7 @@ def predict_batch(model, x, batch_size=128, device='cuda'):
         for i in range(0, x.size(0), batch_size):
             y_pred.append(model(x[i:i+batch_size].to(device)))
         y_pred = torch.cat(y_pred)
-        print(f"pred step: y_pred[:3] = {y_pred[:3]}")
+        # print(f"pred step: y_pred[:3] = {y_pred[:3]}")
     return y_pred
 
 def eval(model, x, y, loss_fn, mode, device='cuda'):
@@ -193,243 +167,137 @@ def packbits_eval(model, x, y, device='cuda'):
 
 def main(args):
     
-    draw = Draw('plots', interactive=args.interactive)
-    print(vars(args))
-
-    device = IMPL_TO_DEVICE[args.implementation]
-
     torch.manual_seed(args.seed)
     random.seed(args.seed)
     np.random.seed(args.seed)
 
+    # x_train, y_train, is_outlier_train, x_val, y_val, is_outlier_val, x_test, y_test, is_outlier_test = \
+    #     get_training_data("saved_inputs_targets", backend="torch", zb_frac=-1, use_outliers=False)
     x_train, y_train, is_outlier_train, x_val, y_val, is_outlier_val, x_test, y_test, is_outlier_test = \
-        get_training_data("saved_inputs_targets", backend="torch", zb_frac=4, use_outliers=True)
+        get_training_data("/scratch/network/lg0508/cicada-data/saved_inputs_targets", backend="torch", zb_frac=4, use_outliers=True)
+    # x_train, y_train, is_outlier_train, x_val, y_val, is_outlier_val, x_test, y_test, is_outlier_test = \
+    #     get_training_data("saved_inputs_targets", backend="torch", zb_frac=0, use_outliers=True)
+
+    # zero-pad to get shape (18, 14) -> (18, 18)
+    # x_train = F.pad(x_train, (0, 4), "constant", 0)
+    # x_val = F.pad(x_val, (0, 4), "constant", 0)
+    # x_test = F.pad(x_test, (0, 4), "constant", 0)
     
-    x_val = x_val#[:1_000]
-    y_val = y_val#[:1_000]
-    is_outlier_val = is_outlier_val#[:1_000]
+    x_val = x_val[:1_000]
+    y_val = y_val[:1_000]
+    is_outlier_val = is_outlier_val[:1_000]
     
-    x_test = x_test#[:10_000]
-    y_test = y_test#[:10_000]
-    is_outlier_test = is_outlier_test#[:10_000]
+    x_test = x_test[:10_000]
+    y_test = y_test[:10_000]
+    is_outlier_test = is_outlier_test[:10_000]
 
-    # pad zeros to turn 18x14 into 18x18
-    x_train = F.pad(x_train, (0, 4, 0, 0))
-    x_val = F.pad(x_val, (0, 4, 0, 0))
-    x_test = F.pad(x_test, (0, 4, 0, 0))
+    if args.transform_name != "identity":
+        transform = get_transform(args.transform_name)
+        x_train, x_val, x_test = transform(x_train.int()), transform(x_val.int()), transform(x_test.int())
 
-    # x_train = torch.log1p(x_train).to(device)
-    # x_val = torch.log1p(x_val).to(device)
-    # x_test = torch.log1p(x_test).to(device)
+    print(f"x_train.shape = {x_train.shape}, y_train.shape = {y_train.shape}")
 
-    # global_max = max(x_train.max(), x_val.max(), x_test.max())
-    # global_max = 2.
-    # x_train = (x_train / global_max).to(device)
-    # x_val = (x_val / global_max).to(device)
-    # x_test = (x_test / global_max).to(device)
+    plt.hist(x_train.detach().cpu().numpy().flatten(), bins=100)
+    plt.show()
 
-    # plt.hist(x_train.detach().cpu().numpy().flatten(), bins=100)
-    # plt.show()
-
-    # transform = get_int_to_bits_transform(10)
-    # N_BITS = 10
-
-    # transform = get_smooth_threshold_transform([0, 1, 2, 4, 64])
-    # transform = get_threshold_transform([0, 1, 2, 32])
-    transform = get_threshold_transform([0, 1, 2, 16, 64])
-    # transform = get_threshold_transform([0, 1, 2, 64, 128])
-    # transform = get_threshold_transform([0, 4])
-    # transform = get_clipped_threshold_transform([0])
-    # transform2 = get_clipped_threshold_transform([0, 1, 2, 64])
-    # transform2 = get_smooth_threshold_transform([0, 1, 2, 4], steepness=5)
-
-    # _ = transform(torch.tensor([[[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]]))
-    # _ = transform2(torch.tensor([[[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]]))
-
-    # exit(0)
-
-    N_BITS = 5
-    # N_BITS = 1
-    
-    # add an axes to get shape (n, 1, 18, 14)
-    # x_train, x_val, x_test = x_train.unsqueeze(1), x_val.unsqueeze(1), x_test.unsqueeze(1)
-
-    x_train, x_val, x_test = transform(x_train.int()), transform(x_val.int()), transform(x_test.int())
-
-    
-    # exit()
-
-    # ###   Optional: logarithmic scaling for reduced number of bits   ###
-    # N_BITS = 10
-
-    # # scale logarithmically w/ ideal base (no wasted range)
-    # base = 1025 ** (1 / 2**N_BITS)
-    # x_train = (torch.log(x_train + 1) / torch.log(torch.tensor(base))).int()
-    # x_val = (torch.log(x_val + 1) / torch.log(torch.tensor(base))).int()
-
-    # # represent in binary (expand dims to (m, 18, 14, N_BITS))
-    # x_train = x_train.int().unsqueeze(-1).bitwise_and(1 << torch.arange(N_BITS-1, -1, -1)).ne(0).int()
-    # x_val = x_val.int().unsqueeze(-1).bitwise_and(1 << torch.arange(N_BITS-1, -1, -1)).ne(0).int()
-
-    # print(f'x_train.shape = {x_train.shape}')
-    # print(f'x_val.shape = {x_val.shape}')
-
-    # import matplotlib.pyplot as plt
-    # plt.hist(x_train.detach().numpy().flatten(), bins=100)
-    # plt.show()
-
-    # plt.hist(x_train.detach().numpy().flatten(), bins=100)
-    # plt.yscale("log")
-    # plt.show()
-
-    # exit()
-
-    model, loss_fn, optim = get_model(args, in_dim=(N_BITS, 18, 18))
+    # model, loss_fn, optim = get_model(args, in_dim=(N_BITS, 18, 18))
+    model, loss_fn, optim = get_modelski(args.model_name, channels=4, learning_rate=args.learning_rate)
 
     # print total number of parameters
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Total number of parameters: {total_params}")
 
-    device = "mps"
     # device = "cpu"
-    model.to(device)
+    # model = model.to(device)
+    # x_val = x_val.to(device)
+    # model.train(True)
+    # print(f"CPU (train): {model(x_val[:3])}")
 
-    # print(f"model = {model}")
-    # for layer in model:
-    #     print(f"layer = {layer}, #neurons = {getattr(layer, 'num_neurons', None)}, #weights = {getattr(layer, 'num_weights', None)}")
-    #     if layer.__class__.__name__ == 'LogicLayer':
-    #         print(f"layer.weight = {layer.weight}")
-    #         argmaxes = layer.weight.argmax(dim=1)
-    #         plt.hist(argmaxes.detach().cpu().numpy().flatten(), bins=100)
-    #         plt.show()
-    #     # print(f"  layer parameters = {[p.shape for p in layer.parameters()]}")
+    # model.train(False)
+    # print(f"CPU (eval): {model(x_val[:3])}")
+
+    # # Switch to GPU
+    # device = "cuda"
+    # model = model.to(device)
+    # x_val = x_val.to(device)
+    # model.train(True)
+    # print(f"GPU (train): {model(x_val[:3])}")
+
+    # model.train(False)
+    # print(f"GPU (eval): {model(x_val[:3])}")
 
     # exit(0)
 
-    # preds = model(x_val.to(device))
-    # plt.hist(preds.detach().numpy().flatten(), bins=100)
-    # plt.show()
+    model.to(args.device)
 
-    x_val = x_val.to(device)
-    y_val = y_val.to(device)
+    print(f"x_val.shape = {x_val.shape}, y_val.shape = {y_val.shape}")
+
+    x_val = x_val.to(args.device)
+    y_val = y_val.to(args.device)
+
+    print(model(x_val[:1]).shape)
 
     print(model(x_val[:20]))
 
     losses = defaultdict(list)
+    conv_entropy_lambda, ff_entropy_lambda = 0.0, 0.0
     for i in tqdm(range(args.num_iterations)):
         beg = (i * args.batch_size) % x_train.shape[0]
         end = beg + args.batch_size
         x = x_train[beg:end]
         y = y_train[beg:end]
 
-        x = x.to(BITS_TO_TORCH_FLOATING_POINT_TYPE[args.training_bit_count]).to(device)
-        y = y.to(device)
+        x = x.to(BITS_TO_TORCH_FLOATING_POINT_TYPE[args.training_bit_count]).to(args.device)
+        y = y.to(args.device)
 
-        loss = train(model, x, y, loss_fn, optim)
+        # loss = train(model, x, y, loss_fn, optim)
+        loss, total_entropy, ff_entropy = train_with_regularization(
+            model, x, y, loss_fn, optim, conv_entropy_lambda=conv_entropy_lambda, ff_entropy_lambda=ff_entropy_lambda
+        )
 
         if (i+1) % args.eval_freq == 0:
             losses['train_train_mode'].append(loss)
-            losses['train_eval_mode'].append(eval(model, x, y, loss_fn, mode=False, device=device))
-            losses['val_train_mode'].append(eval(model, x_val, y_val, loss_fn, mode=True, device=device))
-            losses['val_eval_mode'].append(eval(model, x_val, y_val, loss_fn, mode=False, device=device))
+            losses['conv_entropy'].append(total_entropy)
+            losses['ff_entropy'].append(ff_entropy)
+            losses['train_eval_mode'].append(eval(model, x, y, loss_fn, mode=False, device=args.device))
+            losses['val_train_mode'].append(eval(model, x_val, y_val, loss_fn, mode=True, device=args.device))
+            losses['val_eval_mode'].append(eval(model, x_val, y_val, loss_fn, mode=False, device=args.device))
             if args.packbits_eval:
-                losses['train_bits_mode'].append(packbits_eval(model, x, y, device=device))
-                losses['valid_bits_mode'].append(packbits_eval(model, x_val, y_val, device=device))
+                losses['train_bits_mode'].append(packbits_eval(model, x, y, device=args.device))
+                losses['valid_bits_mode'].append(packbits_eval(model, x_val, y_val, device=args.device))
 
-            print({k: v[-1] for k, v in losses.items()})
+            print({k: round(v[-1], 3) for k, v in losses.items()})
 
-        # after 200 epochs, add clamp layer
-        if i == 200:
+        if (i+1) % args.save_freq == 0:
+            df = pd.DataFrame(losses)
+            df.to_csv(f"{args.output}/losses.csv", index=False)
+            torch.save(model, f"{args.output}/model_iter{i+1}.pt")
+
+        # after some epochs, add clamp layer
+        if i == 3000:
             print(f"Adding clamp layer now")
             model = torch.nn.Sequential(
                 model,
                 ClampLayer(0, 256)
-            ).to(device)
+            ).to(args.device)
 
-    # exit(0)
+        # if (i+1) % 2000 == 0:
+        #     conv_entropy_lambda += 0.001 * ((i + 1) // 1000)
+        #     ff_entropy_lambda += 0.0001 * ((i + 1) // 1000)
+        #     print(f"Increased entropy regularization to {conv_entropy_lambda} (conv), {ff_entropy_lambda} (ff)")
 
-    y_pred = predict_batch(model, x_test, batch_size=128, device=device)
+
+    torch.save(model, f"{args.output}/model.pt")
+
+    y_pred = predict_batch(model, x_test, batch_size=128, device=args.device)
     y_pred = y_pred.cpu().detach().numpy().flatten()
 
     plt.hist(y_pred, bins=100)
     plt.show()
 
-    torch.save(model, f"data/models/clgn-5qb.pt")
-    np.save("data/predictions/clgn-5qb/x_test.npy", y_pred)
+    np.save(f"data/predictions/{args.model_name}_x_test.npy", y_pred)
 
-    ####################################################################################
-    ###################################   PLOTTING   ###################################
-    ####################################################################################
     
-    draw.make_scatter_density_plot(y_test.cpu().detach().numpy().flatten(), y_pred, 'Inc', 'Target', 'Difflogic')
-    draw.make_scatter_density_plot(y_test[~is_outlier_test].cpu().detach().numpy().flatten(), y_pred[~is_outlier_test], 'ZB', 'Target', 'Difflogic')
-    draw.make_scatter_density_plot(y_test[is_outlier_test].cpu().detach().numpy().flatten(), y_pred[is_outlier_test], 'TT', 'Target', 'Difflogic')
-
-    draw.make_scatter_plot(
-        teacher_scores=[y_test[~is_outlier_test].cpu().detach().numpy().flatten(), y_test[is_outlier_test].cpu().detach().numpy().flatten()],
-        student_scores=[y_pred[~is_outlier_test], y_pred[is_outlier_test]],
-        labels=['Difflogic ZB', 'Difflogic TT'],
-    )
-
-    draw.plot_anomaly_score_distribution(
-        [y_test[~is_outlier_test].cpu().detach().numpy(), y_pred[~is_outlier_test], y_test[is_outlier_test].cpu().detach().numpy(), y_pred[is_outlier_test]],
-        ['Target ZB', 'Difflogic ZB', 'Target TT', 'Difflogic TT'],
-        "anomaly-scores",
-    )
-
-    y_diff_float = model(x_test).detach().numpy()
-    y_diff_bin = model(x_test.bool().int()).detach().numpy()
-
-    model.train(False)
-    y_bin_float = model(x_test).numpy()
-    y_bin_bin = model(x_test.bool().int()).numpy()
-    model.train(True)
-
-    draw.plot_anomaly_score_distribution(
-        [y_test.detach().numpy(), y_diff_float, y_diff_bin, y_bin_float, y_bin_bin],
-        ['Target', 'Diff(float)', 'Diff(bin)', 'Bin(float)', 'Bin(bin)'],
-        "anomaly-scores-modes-inputs",
-    )
-
-    exit(0)
-
-    #####################################################################################
-    ###################################   COMPILING   ###################################
-    #####################################################################################
-
-    model.train(False)
-
-    print("Debug info", flush=True)
-
-    compiled_model = CompiledLogicNet(
-        model=model,            # the trained model (should be a `torch.nn.Sequential` with `LogicLayer`s)
-        num_bits=8,            # the number of bits of the datatype used for inference (typically 64 is fastest, should not be larger than batch size)
-        # num_bits=8,            # the number of bits of the datatype used for inference (typically 64 is fastest, should not be larger than batch size)
-        cpu_compiler='gcc',     # the compiler to use for the c code (alternative: clang)
-        # cpu_compiler='clang',     # the compiler to use for the c code (alternative: clang)
-        verbose=True
-    )
-    compiled_model.compile(
-        save_lib_path='my_model_binary.so',  # the (optional) location for storing the binary such that it can be reused
-        verbose=True
-    )
-
-    print("Testing compiled model:")
-    x_val_test = x_val[:51,:,:,:]
-    print("x_val_test.shape = ", x_val_test.shape)
-    print(f"model(x_val_test) =\n{model(x_val_test)}")
-    print(f"compiled_model(x_val_test) =\n{compiled_model(x_val_test.bool().numpy(), verbose=True)}")
-
-    compiled_model_results = compiled_model(x_val.bool().numpy(), verbose=True)
-    with open("y_val_lgn_ref.txt", "w") as f:
-        for val in compiled_model_results:
-            f.write(f"{val.item()}\n")
-
-
-    model_c_code = compiled_model.get_c_code()
-    with open("cicada_model_opendata_highoutlier.c", "w") as f:
-        f.write(model_c_code)
-
 
 if __name__ == '__main__':
 
@@ -451,6 +319,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--num-iterations', '-ni', type=int, default=100_000, help='Number of iterations (default: 100_000)')
     parser.add_argument('--eval-freq', '-ef', type=int, default=2_000, help='Evaluation frequency (default: 2_000)')
+    parser.add_argument('--save-freq', '-sf', type=int, default=5_000, help='Save frequency (default: 5_000)')
 
     parser.add_argument('--valid-set-size', '-vss', type=float, default=0., help='Fraction of the train set used for validation (default: 0.)')
     parser.add_argument('--extensive-eval', action='store_true', help='Additional evaluation (incl. valid set eval).')
@@ -462,6 +331,9 @@ if __name__ == '__main__':
     parser.add_argument('--beta', '-b', type=float, default=0, help='offset in groupsum')
     parser.add_argument('--interactive', action='store_true', help='Interactively display plots as they are created', default=False)
 
-    parser.add_argument('--grad-factor', type=float, default=1.)
+    parser.add_argument('--model-name', type=str, default='clgn-zb-only-4qb', help='Name of the model')
+    parser.add_argument('--output', type=str, default='data/models/latest', action=CreateFolder, help='path to save the trained model to')
+    parser.add_argument('--transform-name', type=str, default='identity', help='Name of the bit transform to use')
+    parser.add_argument('--device', type=str, default='cpu', help='Device to use for training')
 
     main(parser.parse_args())
