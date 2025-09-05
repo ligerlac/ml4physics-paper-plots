@@ -10,9 +10,7 @@ from typing import List
 
 
 from neurodifflogic.models.difflog_layers.linear import GroupSum, LogicLayer
-from neurodifflogic.models.difflog_layers.conv import LogicConv2d, OrPoolingLayer
-from neurodifflogic.models import CNN
-from neurodifflogic.difflogic import PackBitsTensor
+from neurodifflogic.models.difflog_layers.conv import LogicConv2d, OrPoolingLayer, LogicConv3d
 
 
 from utils import get_training_data, CreateFolder
@@ -43,39 +41,72 @@ class ClampLayer(torch.nn.Module):
         return torch.clamp(x, self.min_value, self.max_value)
     
 
-def get_model(n_channels: int, n_kernels: int, stride: int, tree_depth: int, receptive_field_size: int, learning_rate=0.01):
+def get_model(
+    n_channels: int, n_kernels: int, stride: int, tree_depth: int, receptive_field_size: int, learning_rate=0.01, arch="conv2d"
+):
     n_neurons_last_layer = 256 * 16
     tau = n_neurons_last_layer / 512
     beta = -n_neurons_last_layer / 2 + 32 * tau
-    out_shape_conv = (
-        (18 - receptive_field_size) // stride + 1,
-        (14 - receptive_field_size) // stride + 1
-    )
-    print(f"out_shape_conv = {out_shape_conv}")
-    model = torch.nn.Sequential(
-        LogicConv2d(
-            in_dim=(18, 14),
-            stride=stride,
-            num_kernels=n_kernels,
-            channels=n_channels,
-            tree_depth=tree_depth,
-            receptive_field_size=receptive_field_size,
-            padding=0,
-            connections='random',
-            implementation='python',
-            device='cpu'
-        ),
-        torch.nn.Flatten(),
-        LogicLayer(in_dim=out_shape_conv[0]*out_shape_conv[1] * n_kernels, out_dim=64*n_kernels,
-                    connections='random', implementation='python', device='cpu'),
-        LogicLayer(in_dim=64*n_kernels, out_dim=32*n_kernels,
-                    connections='random', implementation='python', device='cpu'),
-        LogicLayer(in_dim=32*n_kernels, out_dim=16*n_kernels,
-                    connections='random', implementation='python', device='cpu'),
-        LogicLayer(in_dim=16*n_kernels, out_dim=n_neurons_last_layer,
-                    connections='random', implementation='python', device='cpu'),
-        GroupSum(1, tau=tau, beta=beta),
-    )
+    if arch == "conv2d":
+        out_shape_conv = (
+            (18 - receptive_field_size) // stride + 1,
+            (14 - receptive_field_size) // stride + 1
+        )
+        model = torch.nn.Sequential(
+            LogicConv2d(
+                in_dim=(18, 14),
+                stride=stride,
+                num_kernels=n_kernels,
+                channels=n_channels,
+                tree_depth=tree_depth,
+                receptive_field_size=receptive_field_size,
+                padding=0,
+                connections='random',
+                implementation='python',
+                device='cpu'
+            ),
+            torch.nn.Flatten(),
+            LogicLayer(in_dim=out_shape_conv[0]*out_shape_conv[1] * n_kernels, out_dim=64*n_kernels,
+                        connections='random', implementation='python', device='cpu'),
+            LogicLayer(in_dim=64*n_kernels, out_dim=32*n_kernels,
+                        connections='random', implementation='python', device='cpu'),
+            LogicLayer(in_dim=32*n_kernels, out_dim=16*n_kernels,
+                        connections='random', implementation='python', device='cpu'),
+            LogicLayer(in_dim=16*n_kernels, out_dim=n_neurons_last_layer,
+                        connections='random', implementation='python', device='cpu'),
+            GroupSum(1, tau=tau, beta=beta),
+        )
+    elif arch == "conv3d":
+        out_shape_conv = (
+            (18 - 4) // stride + 1,
+            (14 - 4) // stride + 1,
+            (n_channels - 1) // stride + 1
+        )
+        print(f"out_shape_conv = {out_shape_conv}")
+        model = torch.nn.Sequential(
+            LogicConv3d(
+                in_dim=(18, 14, n_channels),
+                stride=stride,
+                num_kernels=n_kernels,
+                channels=1,
+                tree_depth=tree_depth,
+                receptive_field_size=(4, 4, 1),
+                padding=0,
+                connections='random',
+                implementation='python',
+                device='cpu'
+            ),
+            torch.nn.Flatten(),
+            LogicLayer(in_dim=out_shape_conv[0]*out_shape_conv[1]*out_shape_conv[2] * n_kernels, out_dim=64*n_kernels,
+                        connections='random', implementation='python', device='cpu'),
+            LogicLayer(in_dim=64*n_kernels, out_dim=32*n_kernels,
+                        connections='random', implementation='python', device='cpu'),
+            LogicLayer(in_dim=32*n_kernels, out_dim=16*n_kernels,
+                        connections='random', implementation='python', device='cpu'),
+            LogicLayer(in_dim=16*n_kernels, out_dim=n_neurons_last_layer,
+                        connections='random', implementation='python', device='cpu'),
+            GroupSum(1, tau=tau, beta=beta),
+        )
 
     loss_fn = torch.nn.L1Loss()
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
@@ -158,8 +189,9 @@ def main(args):
     np.random.seed(args.seed)
 
     x_train, y_train, is_outlier_train, x_val, y_val, is_outlier_val, x_test, y_test, is_outlier_test = \
-        get_training_data("/scratch/network/lg0508/cicada-data/saved_inputs_targets", backend="torch", zb_frac=4, use_outliers=True)
-    
+        get_training_data("saved_inputs_targets", backend="torch", zb_frac=4, use_outliers=True)
+        # get_training_data("/scratch/network/lg0508/cicada-data/saved_inputs_targets", backend="torch", zb_frac=4, use_outliers=True)
+
     x_val = x_val[:1_000]
     y_val = y_val[:1_000]
     is_outlier_val = is_outlier_val[:1_000]
@@ -173,6 +205,13 @@ def main(args):
     x_train, x_val, x_test = transform(x_train.int()), transform(x_val.int()), transform(x_test.int())
     n_channels = x_train.shape[1]
 
+    # reshape from (m, c, 18, 14) to (m, 1, 18, 14, c)
+    if args.arch == "conv3d":
+        x_train = x_train.permute(0, 2, 3, 1).unsqueeze(1)
+        x_val = x_val.permute(0, 2, 3, 1).unsqueeze(1)
+        x_test = x_test.permute(0, 2, 3, 1).unsqueeze(1)
+        # n_channels = x_train.shape[4]
+
     print(f"x_train.shape = {x_train.shape}, y_train.shape = {y_train.shape}")
 
     model, loss_fn, optim = get_model(
@@ -181,7 +220,8 @@ def main(args):
         stride = args.stride,
         tree_depth = args.tree_depth,
         receptive_field_size = args.receptive_field_size,
-        learning_rate = args.learning_rate
+        learning_rate = args.learning_rate,
+        arch = args.arch
     )
 
     # print total number of parameters
@@ -210,10 +250,10 @@ def main(args):
         x = x.to(BITS_TO_TORCH_FLOATING_POINT_TYPE[args.training_bit_count]).to(args.device)
         y = y.to(args.device)
 
-        # loss = train(model, x, y, loss_fn, optim)
-        loss, total_entropy, ff_entropy = train_with_regularization(
-            model, x, y, loss_fn, optim, conv_entropy_lambda=conv_entropy_lambda, ff_entropy_lambda=ff_entropy_lambda
-        )
+        loss = train(model, x, y, loss_fn, optim)
+        # loss, total_entropy, ff_entropy = train_with_regularization(
+        #     model, x, y, loss_fn, optim, conv_entropy_lambda=conv_entropy_lambda, ff_entropy_lambda=ff_entropy_lambda
+        # )
 
         if (i+1) % args.eval_freq == 0:
             losses['train_train_mode'].append(loss)
@@ -222,8 +262,8 @@ def main(args):
             losses['val_eval_mode'].append(eval(model, x_val, y_val, loss_fn, mode=False, device=args.device))
             losses['train_bits_mode'].append(bits_eval(model, x, y, loss_fn, device=args.device))
             losses['val_bits_mode'].append(bits_eval(model, x_val, y_val, loss_fn, device=args.device))
-            losses['conv_entropy'].append(total_entropy)
-            losses['ff_entropy'].append(ff_entropy)
+            # losses['conv_entropy'].append(total_entropy)
+            # losses['ff_entropy'].append(ff_entropy)
 
             print({k: round(v[-1], 3) for k, v in losses.items()})
 
@@ -273,5 +313,6 @@ if __name__ == '__main__':
 
     parser.add_argument('--output', type=str, default='data/models/latest', action=CreateFolder, help='path to save the trained model to')
     parser.add_argument('--device', type=str, default='cpu', help='Device to use for training')
+    parser.add_argument('--arch', type=str, default='conv2d', help='Architecture to use (conv2d or conv3d)')
 
     main(parser.parse_args())
